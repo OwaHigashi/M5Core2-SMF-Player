@@ -246,7 +246,7 @@ void MD_MIDIFile::processEvents(uint16_t ticks)
     // Other than the first event, the others have an elapsed time of 0 (ie occur simultaneously)
     for (n=0; n < 100; n++)
     {
-      if (!_track[i].getNextEvent(this, (n==0 ? ticks : 0)))
+        if (!_track[i].getNextEvent(this, (n==0 ? ticks : 0)))
         break;
     }
 

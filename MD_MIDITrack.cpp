@@ -20,6 +20,7 @@
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #include <string.h>
+#include <M5Core2.h>
 #include "MD_MIDIFile.h"
 #include "MD_MIDIHelper.h"
 
@@ -121,12 +122,25 @@ bool MD_MFTrack::getNextEvent(MD_MIDIFile *mf, uint16_t tickCount)
   return(true);
 }
 
+inline void drawKey(int note, int ch, bool press)
+{
+  static constexpr int note_x[] = {0, 2, 4, 6, 8, 12, 14, 16, 18, 20, 22, 24 };
+  static constexpr int note_y[] = {4, 0, 4, 0, 4,  4,  0,  4,  0,  4,  0,  4 };
+
+  int oct = note / 12;
+  int idx = note - oct * 12;
+  int dx = 18 + oct * 28 + note_x[idx];
+  int dy = 61 +  ch * 10 + note_y[idx];
+  int color = WHITE;
+  if (!press) color = note_y[idx] ? DARKGREY : BLACK;
+  M5.Lcd.fillRect(dx, dy, 3, 2, color);
+}
+
 void MD_MFTrack::parseEvent(MD_MIDIFile *mf)
 // process the event from the physical file
 {
   uint8_t eType;
   uint32_t mLen;
-
   // now we have to process this event
   eType = mf->_fd.read();
 
@@ -149,6 +163,15 @@ void MD_MFTrack::parseEvent(MD_MIDIFile *mf)
     DUMPX(" Data: ", _mev.data[0]);
     DUMPX(" ", _mev.data[1]);
     DUMPX(" ", _mev.data[2]);
+    if(_mev.data[0] == 0x90){ // Note ON
+      if(_mev.data[2] == 0){
+        drawKey(_mev.data[1], _mev.channel, false);
+      }else{
+        drawKey(_mev.data[1], _mev.channel, true);
+      }
+    }else if(_mev.data[0] == 0x80){ // Note OFF
+      drawKey(_mev.data[1], _mev.channel, false);
+    }
 #if !DUMP_DATA
     if (mf->_midiHandler != nullptr)
       (mf->_midiHandler)(&_mev);
