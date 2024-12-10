@@ -1,59 +1,99 @@
-// Test playing a succession of MIDI files from the SD card.
-// Example program to demonstrate the use of the MIDFile library
-// Just for fun light up a LED in time to the music.
+// 完全独自のMini SMF(Standard Midi File) Sequencer Sample Program
+// SDカード内に格納したSMFファイルを自動で演奏します。
+// 以下のI/F/ライブラリを使用します
+//  M5Stack用MIDIモジュール MODULE SYNTH
 //
-// Hardware required:
-//  SD card interface - change SD_SELECT for SPI comms
-//  3 LEDs (optional) - to display current status and beat.
-//  Change pin definitions for specific hardware setup - defined below.
+// 尾和東@Pococha技術枠
+// necobit版SMFプレーヤーをUNIT-SYNTHを装着したCore2で演奏するように改造していましたが、
+// 起動速度が遅い、もたつくなどの問題があり、一から作り直しました。
+// さらに、任意のファイル名を受け付けてプレイリストを生成するように修正。
+// さらに、SD Updaterにも対応！
 
-#include <M5Stack.h>
-#include <SdFat.h>
+
+#include <M5Core2.h>
+// for SD-Updater
+#define SDU_ENABLE_GZ
+#include <M5StackUpdater.h>
+
+// LovyanGFX関連削除
+// #define LGFX_AUTODETECT
+// #define LGFX_USE_V1
+// #include <LovyanGFX.hpp>
+// #include <LGFX_AUTODETECT.hpp>  // クラス"LGFX"を用意します
+// static LGFX lcd; // 削除
+
 #include "MD_MIDIFile.h"
 
-//#define CORE2
-#define CORE1
+// #define CORE1
+#define CORE2
 
-HardwareSerial MIDI_SERIAL(2); // UART2 を使用
+HardwareSerial MIDI_SERIAL(2);
 
 const uint16_t WAIT_DELAY = 2000; // ms
 
-#define ARRAY_SIZE(a) (sizeof(a)/sizeof((a)[0]))
+#define MAX_SONGS 100
+#define MAX_FILENAME_LENGTH 64
 
-// The files in the tune list should be located on the SD card
-// or an error will occur opening the file and the next in the
-// list will be opened (skips errors).
-const char *tuneList[] =
-{
-  "LOOPDEMO.MID",  // simplest and shortest file
-  "BANDIT.MID",
-  "ELISE.MID",
-  "TWINKLE.MID",
-  "GANGNAM.MID",
-  "FUGUEGM.MID",
-  "POPCORN.MID",
-  "AIR.MID",
-  "PRDANCER.MID",
-  "MINUET.MID",
-  "FIRERAIN.MID",
-  "MOZART.MID",
-  "FERNANDO.MID",
-  "SONATAC.MID",
-  "SKYFALL.MID",
-  "XMAS.MID",
-  "GBROWN.MID",
-  "PROWLER.MID",
-  "IPANEMA.MID",
-  "JZBUMBLE.MID",
-};
-
-SDFAT	mySD;
+SdFat mySD;
 MD_MIDIFile SMF;
 
+char songFilenames[MAX_SONGS][MAX_FILENAME_LENGTH]; 
+int songCount = 0;
+char *currentFilename = NULL;
+int playdataCnt = 0;
+
+#define SPI_SPEED SD_SCK_MHZ(25)
+#define TFCARD_CS_PIN 4
+#define SD_CONFIG SdSpiConfig(TFCARD_CS_PIN, SHARED_SPI, SPI_SPEED)
+
+char *makeFilename(int seq)
+{
+  if (songCount == 0) {
+    return NULL;
+  }
+  playdataCnt += seq;
+  if (playdataCnt >= songCount) {
+    playdataCnt = 0;
+  } else if (playdataCnt < 0) {
+    playdataCnt = songCount - 1;
+  }
+  return songFilenames[playdataCnt];
+}
+
+void scanSongs()
+{
+  songCount = 0;
+  FsFile root = mySD.open("/smf");
+  if (!root || !root.isDirectory())
+  {
+    M5.Lcd.println("Failed to open /smf folder or /smf is not a directory");
+    return;
+  }
+
+  FsFile entry;
+  while (entry.openNext(&root, O_RDONLY))
+  {
+    if (!entry.isDir())
+    {
+      char filename[MAX_FILENAME_LENGTH];
+      entry.getName(filename, sizeof(filename));
+      String filenameStr(filename);
+      if (filenameStr.endsWith(".mid") || filenameStr.endsWith(".MID") ||
+          filenameStr.endsWith(".smf") || filenameStr.endsWith(".SMF"))
+      {
+        strncpy(songFilenames[songCount], filename, MAX_FILENAME_LENGTH);
+        songFilenames[songCount][MAX_FILENAME_LENGTH - 1] = '\0';
+        Serial.println(filename);
+        songCount++;
+        if (songCount >= MAX_SONGS) break;
+      }
+    }
+    entry.close();
+  }
+  root.close();
+}
+
 void midiCallback(midi_event *pev)
-// Called by the MIDIFile library when a file event needs to be processed
-// thru the midi communications interface.
-// This callback is set up in the setup() function.
 {
   if ((pev->data[0] >= 0x80) && (pev->data[0] <= 0xe0))
   {
@@ -67,24 +107,13 @@ void midiCallback(midi_event *pev)
 }
 
 void sysexCallback(sysex_event *pev)
-// Called by the MIDIFile library when a system Exclusive (sysex) file event needs
-// to be processed through the midi communications interface. Most sysex events cannot
-// really be processed, so we just ignore it here.
-// This callback is set up in the setup() function.
 {
   // No action required
 }
 
 void midiSilence(void)
-// Turn everything off on every channel.
-// Some midi files are badly behaved and leave notes hanging, so between songs turn
-// off all the notes and sound
 {
   midi_event ev;
-
-  // All sound off
-  // When All Sound Off is received all oscillators will turn off, and their volume
-  // envelopes are set to zero as soon as possible.
   ev.size = 0;
   ev.data[ev.size++] = 0xb0;
   ev.data[ev.size++] = 120;
@@ -94,110 +123,213 @@ void midiSilence(void)
     midiCallback(&ev);
 }
 
-// in the main file define the max SPI speed
-#define SPI_SPEED SD_SCK_MHZ(25)                             // MHz: OK 4, 10, 20, 25  ->  too much: 29, 30, 40, 50 causes errors
-#define TFCARD_CS_PIN 4
-#define SD_CONFIG SdSpiConfig(TFCARD_CS_PIN, SHARED_SPI, SPI_SPEED) // TFCARD_CS_PIN is defined in M5Stack Config.h (Pin 4)
+void tickMetronome(void)
+{
+  // Optional
+}
+
+enum PlayState {
+  S_STOPPED,
+  S_PLAYING,
+  S_PAUSE,
+  S_WAITING,
+  S_ERROR
+};
+PlayState state = S_STOPPED;
+bool isEOFReached = false;
+
+void backscreen() {
+  M5.Lcd.setTextFont(0);
+  M5.Lcd.setTextColor(TFT_BLACK); // テキスト色設定(背景塗りつぶしはfillRectで)
+  
+  for (int chd = 1; chd <= 16; chd++)
+  {
+    int y = 49 + chd * 10;
+    M5.Lcd.drawNumber(chd, 4, y + 1, 1); // drawNumberを使う場合はフォント指定をチェック
+    M5.Lcd.drawFastHLine(2, y - 1, 316, 0xF660);
+    M5.Lcd.fillRect(18, y, 300, 9, TFT_DARKGREY);
+    // ここで音階ラインなどを描画
+    // drawFastVLine(x, y, h, color) のように必ず色指定
+    M5.Lcd.setTextColor(TFT_BLACK, TFT_DARKGREY);
+    for (int oct = 0; oct < 11; ++oct)
+    {
+      int x = 18 + oct * 28;
+      for (int n = 0; n < 7; ++n)
+      {
+        M5.Lcd.drawFastVLine(x + n * 4 + 3, y, 9, TFT_BLACK);
+      }
+      // fillRectも色指定必須
+      M5.Lcd.fillRect(x + 2, y, 3, 5, TFT_BLACK);
+      M5.Lcd.fillRect(x + 6, y, 3, 5, TFT_BLACK);
+      M5.Lcd.fillRect(x + 14, y, 3, 5, TFT_BLACK);
+      M5.Lcd.fillRect(x + 18, y, 3, 5, TFT_BLACK);
+      M5.Lcd.fillRect(x + 22, y, 3, 5, TFT_BLACK);
+    }
+  }
+  M5.Lcd.drawFastVLine(16, 58, 161, 0xF660);
+  M5.Lcd.drawRect(1, 58, 318, 161, 0xF660);
+}
+
+void updateScreen()
+{
+  static String last_filename = "";
+  static int last_status = -1;
+
+  if ((last_filename != String(currentFilename)) || (last_status != state))
+  {
+    M5.Lcd.fillScreen(TFT_BLACK);
+    backscreen();
+    M5.Lcd.setTextFont(4);
+    M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+
+    M5.Lcd.setCursor(5, 0);
+    M5.Lcd.println(currentFilename);
+    M5.Lcd.setCursor(5, 27);
+    M5.Lcd.print(F("Status:"));
+    switch (state)
+    {
+    case S_ERROR:
+      Serial.println("ERROR");
+      M5.Lcd.println(F("File load failed."));
+      break;
+    case S_STOPPED:
+      Serial.println("STOP");
+      M5.Lcd.println(F("stop."));
+      M5.Lcd.fillRect(260, 5, 40, 40, TFT_WHITE);
+      break;
+    case S_PLAYING:
+      Serial.println("PLAY");
+      M5.Lcd.println(F("playing."));
+      M5.Lcd.fillRect(280, 5, 30, 40, TFT_BLACK);
+      M5.Lcd.fillTriangle(280, 5, 280, 45, 310, 25, TFT_YELLOW);
+      backscreen();
+      break;
+    case S_PAUSE:
+      Serial.println("PAUSE");
+      M5.Lcd.println(F("pause."));
+      break;
+    case S_WAITING:
+      Serial.println("WAIT");
+      M5.Lcd.println(F("wait."));
+      break;
+    default:
+      break;
+    }
+
+    last_filename = String(currentFilename);
+    last_status = state;
+  }
+}
+
+void startPlaying()
+{
+  if (currentFilename == NULL || songCount == 0) {
+    M5.Lcd.println("No songs to play.");
+    state = S_ERROR;
+    updateScreen();
+    return;
+  }
+
+  char filepath[256];
+  snprintf(filepath, sizeof(filepath), "/smf/%s", currentFilename);
+  
+  int err = SMF.load(filepath);
+  if (err != MD_MIDIFile::E_OK) {
+    M5.Lcd.printf("Failed to load %s\n", currentFilename);
+    state = S_ERROR;
+    updateScreen();
+    return;
+  }
+  SMF.setMidiHandler(midiCallback);
+  SMF.setSysexHandler(sysexCallback);
+  isEOFReached = false;
+  state = S_PLAYING;
+  M5.Lcd.printf("Playing: %s\n", currentFilename);
+  updateScreen();
+}
+
+void stopPlaying()
+{
+  if (state == S_PLAYING) {
+    SMF.close();
+    midiSilence();
+    state = S_STOPPED;
+    M5.Lcd.println("Stopped.");
+  }
+  updateScreen();
+}
 
 void setup(void)
 {
+  M5.begin();
+  Serial.begin(115200);
 
-#ifdef CORE2
-  MIDI_SERIAL.begin(31250, SERIAL_8N1, -1, 32); // Core2 MIDI 出力をピン32で初期化
-#elif CORE1
-  MIDI_SERIAL.begin(31250, SERIAL_8N1, -1, 21); // Core1 MIDI 出力をピン32で初期化
-#endif
+  checkSDUpdater( SD, MENU_BIN, 5000 );
 
-  // Initialize SD
-  if (!mySD.begin(SD_CONFIG))
-  {
-    while (true) ;
+  Serial.println("SMF Player");
+
+  MIDI_SERIAL.begin(31250, SERIAL_8N1, -1, 32);
+
+  M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.println(F("Initializing SD card..."));
+  if (!mySD.begin(SD_CONFIG)) {
+    M5.Lcd.println(F("Card failed, or not present"));
+    delay(2000);
+    return;
+  }
+  M5.Lcd.println(F("Card initialized."));
+  delay(2000);
+
+  M5.Lcd.println(F("Scanning SMF files..."));
+  scanSongs();
+  if (songCount == 0) {
+    M5.Lcd.println("No SMF files found.");
+    return;
   }
 
-  // Initialize MIDIFile
-  SMF.begin(&mySD);
-  SMF.setMidiHandler(midiCallback);
-  SMF.setSysexHandler(sysexCallback);
-}
-
-void tickMetronome(void)
-// flash a LED to the beat
-{
-  static uint32_t lastBeatTime = 0;
-  static boolean  inBeat = false;
-  uint16_t  beatTime;
-
-  beatTime = 60000 / SMF.getTempo();    // msec/beat = ((60sec/min)*(1000 ms/sec))/(beats/min)
-  if (!inBeat)
-  {
-    if ((millis() - lastBeatTime) >= beatTime)
-    {
-      lastBeatTime = millis();
-      inBeat = true;
-    }
+  currentFilename = makeFilename(0);
+  if (currentFilename == NULL) {
+    M5.Lcd.println("No SMF files to play.");
+    return;
   }
-  else
-  {
-    if ((millis() - lastBeatTime) >= 100)	// keep the flash on for 100ms only
-    {
-      inBeat = false;
-    }
-  }
+
+  M5.Lcd.printf("Ready. Current: %s\n", currentFilename);
+
+  backscreen();
 }
 
 void loop(void)
 {
-  static enum { S_IDLE, S_PLAYING, S_END, S_WAIT_BETWEEN } state = S_IDLE;
-  static uint16_t currTune = ARRAY_SIZE(tuneList);
-  static uint32_t timeStart;
+  M5.update();
 
-  switch (state)
-  {
-    case S_IDLE:    // now idle, set up the next tune
-    {
-      int err;
-
-      currTune++;
-      if (currTune >= ARRAY_SIZE(tuneList))
-        currTune = 0;
-
-      // use the next file name and play it
-      err = SMF.load(tuneList[currTune]);
-      if (err != MD_MIDIFile::E_OK)
-      {
-        timeStart = millis();
-        state = S_WAIT_BETWEEN;
-      }
-      else
-      {
-        state = S_PLAYING;
-      }
-    }
-    break;
-
-    case S_PLAYING: // play the file
-      if (!SMF.isEOF())
-      {
-        if (SMF.getNextEvent())
-          tickMetronome();
-      }
-      else
-        state = S_END;
-      break;
-    case S_END:   // done with this one
-      SMF.close();
-      midiSilence();
-      timeStart = millis();
-      state = S_WAIT_BETWEEN;
-      break;
-
-    case S_WAIT_BETWEEN:    // signal finished with a dignified pause
-      if (millis() - timeStart >= WAIT_DELAY)
-        state = S_IDLE;
-      break;
-
-    default:
-      state = S_IDLE;
-      break;
+  if (M5.BtnA.wasPressed()) {
+    stopPlaying();
+    currentFilename = makeFilename(-1);
+    startPlaying();
   }
+
+  if (M5.BtnB.wasPressed()) {
+    if (state == S_PLAYING) {
+      stopPlaying();
+    } else {
+      startPlaying();
+    }
+  }
+
+  if (M5.BtnC.wasPressed()) {
+    stopPlaying();
+    currentFilename = makeFilename(1);
+    startPlaying();
+  }
+
+  if (state == S_PLAYING) {
+    if (!SMF.isEOF()) {
+      if (SMF.getNextEvent()) {
+        tickMetronome();
+      }
+    } else {
+      stopPlaying();
+    }
+  }
+  updateScreen();
 }

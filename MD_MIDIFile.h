@@ -384,6 +384,7 @@ http://www.stephenhobley.com/blog/2011/03/14/the-last-darned-midi-interface-ill-
 
 #include <Arduino.h>
 #include <SdFat.h>
+#include <Wire.h>
 
 /**
  * \file
