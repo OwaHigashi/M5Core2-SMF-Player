@@ -1,26 +1,9 @@
-// 完全独自のMini SMF(Standard Midi File) Sequencer Sample Program
-// SDカード内に格納したSMFファイルを自動で演奏します。
-// 以下のI/F/ライブラリを使用します
-//  M5Stack用MIDIモジュール MODULE SYNTH
-//
-// 尾和東@Pococha技術枠
-// necobit版SMFプレーヤーをUNIT-SYNTHを装着したCore2で演奏するように改造していましたが、
-// 起動速度が遅い、もたつくなどの問題があり、一から作り直しました。
-// さらに、任意のファイル名を受け付けてプレイリストを生成するように修正。
-// さらに、SD Updaterにも対応！
-
-
 #include <M5Core2.h>
 // for SD-Updater
 #define SDU_ENABLE_GZ
 #include <M5StackUpdater.h>
 
 // LovyanGFX関連削除
-// #define LGFX_AUTODETECT
-// #define LGFX_USE_V1
-// #include <LovyanGFX.hpp>
-// #include <LGFX_AUTODETECT.hpp>  // クラス"LGFX"を用意します
-// static LGFX lcd; // 削除
 
 #include "MD_MIDIFile.h"
 
@@ -31,8 +14,8 @@ HardwareSerial MIDI_SERIAL(2);
 
 const uint16_t WAIT_DELAY = 2000; // ms
 
-#define MAX_SONGS 100
-#define MAX_FILENAME_LENGTH 64
+#define MAX_SONGS 200
+#define MAX_FILENAME_LENGTH 32
 
 SdFat mySD;
 MD_MIDIFile SMF;
@@ -140,16 +123,13 @@ bool isEOFReached = false;
 
 void backscreen() {
   M5.Lcd.setTextFont(0);
-  M5.Lcd.setTextColor(TFT_BLACK); // テキスト色設定(背景塗りつぶしはfillRectで)
-  
   for (int chd = 1; chd <= 16; chd++)
   {
     int y = 49 + chd * 10;
-    M5.Lcd.drawNumber(chd, 4, y + 1, 1); // drawNumberを使う場合はフォント指定をチェック
+    M5.Lcd.setTextColor(WHITE, BLACK);
+    M5.Lcd.drawNumber(chd, 4, y + 1, 1);
     M5.Lcd.drawFastHLine(2, y - 1, 316, 0xF660);
     M5.Lcd.fillRect(18, y, 300, 9, TFT_DARKGREY);
-    // ここで音階ラインなどを描画
-    // drawFastVLine(x, y, h, color) のように必ず色指定
     M5.Lcd.setTextColor(TFT_BLACK, TFT_DARKGREY);
     for (int oct = 0; oct < 11; ++oct)
     {
@@ -158,7 +138,6 @@ void backscreen() {
       {
         M5.Lcd.drawFastVLine(x + n * 4 + 3, y, 9, TFT_BLACK);
       }
-      // fillRectも色指定必須
       M5.Lcd.fillRect(x + 2, y, 3, 5, TFT_BLACK);
       M5.Lcd.fillRect(x + 6, y, 3, 5, TFT_BLACK);
       M5.Lcd.fillRect(x + 14, y, 3, 5, TFT_BLACK);
@@ -302,12 +281,20 @@ void loop(void)
 {
   M5.update();
 
+  // Aボタン: 前の曲へ
   if (M5.BtnA.wasPressed()) {
-    stopPlaying();
-    currentFilename = makeFilename(-1);
-    startPlaying();
+    if (state == S_PLAYING) {
+      stopPlaying();
+      currentFilename = makeFilename(-1);
+      startPlaying();  // 再生中なら次曲も再生
+    } else {
+      currentFilename = makeFilename(-1);
+      // 停止中なら再生開始しない
+      updateScreen();
+    }
   }
 
+  // Bボタン: 再生・停止トグル
   if (M5.BtnB.wasPressed()) {
     if (state == S_PLAYING) {
       stopPlaying();
@@ -316,10 +303,17 @@ void loop(void)
     }
   }
 
+  // Cボタン: 次の曲へ
   if (M5.BtnC.wasPressed()) {
-    stopPlaying();
-    currentFilename = makeFilename(1);
-    startPlaying();
+    if (state == S_PLAYING) {
+      stopPlaying();
+      currentFilename = makeFilename(1);
+      startPlaying();  // 再生中なら次曲も再生
+    } else {
+      currentFilename = makeFilename(1);
+      // 停止中なら再生開始しない
+      updateScreen();
+    }
   }
 
   if (state == S_PLAYING) {
@@ -328,8 +322,12 @@ void loop(void)
         tickMetronome();
       }
     } else {
+      // EOFに達したら自動的に次の曲再生へ
       stopPlaying();
+      currentFilename = makeFilename(1);
+      startPlaying();
     }
   }
+
   updateScreen();
 }
