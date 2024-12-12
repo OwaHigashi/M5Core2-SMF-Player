@@ -7,7 +7,7 @@ M5Core2のSD-Updaterを用いたライブラリ集を構築するプロジェク
 ## どんなアプリ？
 
 こちらは、UNIT-SYNTHに対応した非常にシンプルなSMFプレーヤで、オリジナルは特に画面表示は何も行いませんでしたが、
-@catsin さんの https://bitbucket.org/kyoto-densouan/smfseq/src/m5stack/、さらにはこれを基にしたnecobitさんによる画面描画部分を参考に全て最初から再実装しています。
+@catsin さんのM5Stack + MIDIインタフェース用アプリ ( https://bitbucket.org/kyoto-densouan/smfseq/src/m5stack/ )さらにはこれを基にしたnecobitさんによる画面描画部分を参考に全て最初から再実装しています。
 
 #include "MD_MIDIFile.h"
 
