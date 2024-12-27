@@ -1,6 +1,5 @@
 # M5Stack Simple SMF Player
 
-# 2048_M5Stack
 ## M5Core2ライブラリプロジェクト
 M5Core2のSD-Updaterを用いたライブラリ集を構築するプロジェクトの一環として実装されています。
 
