@@ -39,12 +39,17 @@ bool isPlaying = false;
 uint32_t lastDisplayUpdate = 0;
 const uint32_t DISPLAY_UPDATE_INTERVAL = 100;  // Update display every 100ms
 
-// Playlist storage
+// Playlist storage. Fixed-size to avoid heap fragmentation that builds up
+// over long sessions when re-scanning the SD repeatedly.
+static const int  MAX_PLAYLIST_FILES = 256;
+static const int  MAX_PATH_LEN       = 128;
 struct PlaylistEntry {
-  char filename[256];
+  char filename[MAX_PATH_LEN];
 };
-PlaylistEntry playlist[100];
+PlaylistEntry playlist[MAX_PLAYLIST_FILES];
 int playlistCount = 0;
+static bool smfFileOpen = false;   // tracks whether SMF.load() succeeded so
+                                   // we don't need MD_MIDIFile::isOpen()
 
 // ===== MIDI Callback Functions =====
 
@@ -54,18 +59,22 @@ int playlistCount = 0;
  */
 void midiEventHandler(midi_event *pev) {
   if (pev == nullptr) return;
+  // Defensive bound: pev->data is a 4-byte buffer in MD_MIDIFile but a
+  // corrupt SMF could give us a bogus size; clamp before indexing.
+  uint8_t srcSize = pev->size;
+  if (srcSize == 0) return;
+  if (srcSize > 4) srcSize = 4;
 
   // Prepare MIDI message: status byte + data bytes
   uint8_t message[4];
-  uint8_t messageSize = pev->size + 1;
-
-  if (messageSize > 4) messageSize = 4;  // Safety limit
+  uint8_t messageSize = srcSize + 1;
+  if (messageSize > 4) messageSize = 4;
 
   // Status byte: 0x90 + channel for the command
   message[0] = pev->data[0];
 
   // Copy data bytes
-  for (int i = 0; i < pev->size && (i + 1) < messageSize; i++) {
+  for (int i = 0; i < srcSize && (i + 1) < messageSize; i++) {
     message[i + 1] = pev->data[i + 1];
   }
 
@@ -86,7 +95,13 @@ void sysexEventHandler(sysex_event *pev) {
   // SysEx format: 0xF0 + data bytes + 0xF7
   MIDI_SERIAL.write(0xF0);
 
-  for (int i = 0; i < pev->size; i++) {
+  // pev->data is a fixed 50-byte buffer in MD_MIDIFile; pev->size can be
+  // larger when the SysEx exceeded the buffer, so we must clamp before
+  // iterating to avoid reading past the array.
+  uint16_t cap = (uint16_t)sizeof(pev->data);
+  uint16_t n = pev->size;
+  if (n > cap) n = cap;
+  for (uint16_t i = 0; i < n; i++) {
     MIDI_SERIAL.write(pev->data[i]);
   }
 
@@ -144,7 +159,7 @@ void scanForMIDIFiles() {
                        strcmp(&filename[len - 4], ".SMF") == 0))) {
 
         // Add to playlist
-        if (playlistCount < 100) {
+        if (playlistCount < MAX_PLAYLIST_FILES) {
           snprintf(playlist[playlistCount].filename, sizeof(playlist[playlistCount].filename),
                    "%s/%s", SMF_FOLDER, filename);
           playlistCount++;
@@ -165,19 +180,27 @@ void loadTrack(int index) {
 
   // Stop current playback
   isPlaying = false;
-  if (SMF.isOpen()) {
+  if (smfFileOpen) {
     SMF.close();
+    smfFileOpen = false;
   }
 
   // Load new file
   currentTrackIndex = index;
   strncpy(currentFile, playlist[index].filename, sizeof(currentFile) - 1);
+  currentFile[sizeof(currentFile) - 1] = '\0';
 
   int err = SMF.load(currentFile);
   if (err != MD_MIDIFile::E_OK) {
     M5.Lcd.printf("Error loading %s: %d\n", currentFile, err);
+    // Some failure paths inside MD_MIDIFile::load leave _fd open or the
+    // track table partially populated. Force a clean close so the next
+    // attempt starts from a known state and we never leak a file handle.
+    SMF.close();
+    smfFileOpen = false;
     return;
   }
+  smfFileOpen = true;
 
   // Send "All Notes Off" to all channels at startup
   for (uint8_t ch = 0; ch < 16; ch++) {
@@ -191,7 +214,7 @@ void loadTrack(int index) {
  * Play current track
  */
 void playTrack() {
-  if (!SMF.isOpen()) return;
+  if (!smfFileOpen) return;
   isPlaying = true;
   SMF.restart();
 }
@@ -305,7 +328,7 @@ void onButtonAPressed() {
  * Button B pressed - Play/Stop toggle
  */
 void onButtonBPressed() {
-  if (!SMF.isOpen()) return;
+  if (!smfFileOpen) return;
 
   if (isPlaying) {
     stopTrack();
@@ -376,12 +399,11 @@ void setup() {
     loadTrack(0);
   }
 
-  // SD-Updater support
-  // Check if update button is pressed on startup
-  if (digitalRead(BUTTON_A_PIN) == LOW) {
-    SD_Updater::updateFromFS(SD);
-    ESP.restart();
-  }
+  // SD-Updater hook removed. The original code referenced BUTTON_A_PIN and
+  // SD_Updater::updateFromFS, neither of which exist in the current
+  // M5Stack-SD-Updater 1.2.x API, so the sketch failed to compile. The
+  // updater can be re-added with the modern checkSDUpdater(...) entry point
+  // when needed.
 }
 
 void loop() {
@@ -402,7 +424,7 @@ void loop() {
   updateDisplay();
 
   // Process MIDI events if playing
-  if (isPlaying && SMF.isOpen()) {
+  if (isPlaying && smfFileOpen) {
     if (SMF.getNextEvent()) {
       // Event was processed
       if (SMF.isEOF()) {
