@@ -1,3 +1,9 @@
+// ============================================================
+// DEPRECATED — This sketch is no longer maintained.
+// Use M5Core2-MIDIXposeFilBT / M5Core2-MIDIXposeFilBTUM /
+// M5Tab-MIDIXposeFil instead. Kept for history only.
+// ============================================================
+
 /*
   M5Core2 Simple SMF Player
 
