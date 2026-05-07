@@ -1,8 +1,12 @@
-> **⚠ DEPRECATED — このスケッチは保守終了です**
+# ⚠️ DEPRECATED — このスケッチは保守終了です
+
+> [!WARNING]
+> **このスケッチは保守終了です。SMF 再生機能は `M5Tab-MIDIXposeFil` の PLAY → SMF モードに統合されています。新規利用は下記の後継版へ切り替えてください。**
 >
-> 後継: `M5Core2-MIDIXposeFilBT` (MIDI Module2用) / `M5Core2-MIDIXposeFilBTUM` (Unit MIDI用) / `M5Tab-MIDIXposeFil` (Tab5用) のいずれかをご利用ください。
+> - `M5Tab-MIDIXposeFil` (Tab5 用、SMF / MP3 再生付き)
+> - `M5Core2-MIDIXposeFilBT` / `M5Core2-MIDIXposeFilBTUM` (Core2 用)
 >
-> このスケッチは新規開発・バグ修正・機能追加の対象から外れています。コードは履歴のために残されています。
+> 本スケッチは新規開発・バグ修正・機能追加の対象から外れています。コードは履歴目的で残されています。
 
 ---
 
